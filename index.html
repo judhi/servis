@@ -49,14 +49,14 @@
 </head>
 <body class="min-h-screen flex flex-col font-sans bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 antialiased selection:bg-brand-500 selection:text-white">
 
-  <!-- Browser Support Warning Banner -->
-  <div id="api-warning" class="hidden bg-amber-500/20 border-b border-amber-500/30 text-amber-200 px-4 py-2.5 text-xs sm:text-sm flex items-center justify-between z-50">
+  <!-- Browser & Permissions Warning Banner -->
+  <div id="api-warning" class="hidden bg-amber-500/20 border-b border-amber-500/30 text-amber-200 px-4 py-3 text-xs sm:text-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 z-50">
     <div class="flex items-center space-x-2">
-      <i class="fa-solid fa-triangle-exclamation text-amber-400 text-base"></i>
-      <span><strong>Browser Notice:</strong> Web Serial API is not supported in this browser. Please use a modern Chromium-based desktop browser (Google Chrome, Microsoft Edge, Opera) to read/write hardware serial data.</span>
+      <i class="fa-solid fa-triangle-exclamation text-amber-400 text-base shrink-0"></i>
+      <span id="api-warning-text"><strong>Web Serial Notice:</strong> Web Serial API is not active. Please use Chrome/Edge on Desktop.</span>
     </div>
-    <button onclick="document.getElementById('api-warning').remove()" class="text-amber-300 hover:text-white p-1">
-      <i class="fa-solid fa-xmark"></i>
+    <button id="open-standalone-btn" onclick="window.open(window.location.href, '_blank')" class="hidden bg-amber-600 hover:bg-amber-500 text-white px-3 py-1 rounded-lg font-medium text-xs transition-colors shrink-0">
+      <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i> Open in New Window
     </button>
   </div>
 
@@ -229,23 +229,26 @@
             <select id="line-ending" class="w-full bg-slate-800 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-brand-500">
               <option value="\n" selected>LF (\n)</option>
               <option value="\r\n">CRLF (\r\n)</option>
+              <option value="\r">CR (\r)</option>
               <option value="">None</option>
             </select>
           </div>
         </div>
 
-        <!-- Format Preset / Template -->
+        <!-- Format Preset / Template Selector -->
         <div>
           <label class="block text-xs font-medium text-slate-300 mb-1">Payload Format Template</label>
           <div class="space-y-2">
             <select id="payload-format" class="w-full bg-slate-800 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-brand-500">
-              <option value="raw" selected>Raw Value (e.g. 24.5)</option>
-              <option value="prefixed">Prefixed (e.g. TEMP:24.5C)</option>
-              <option value="json">JSON Object (e.g. {"temp":24.5})</option>
-              <option value="custom">Custom Template ({temp}, {unit}, {city})</option>
+              <option value="raw-temp" selected>Raw temp (temp only)</option>
+              <option value="raw-sky">Raw sky (sky weather only)</option>
+              <option value="csv-plain">CSV plain (timestamp; city; weather; temp; humidity; wind speed)</option>
+              <option value="csv-labeled">CSV labeled (TIME:...; CITY:...; SKY:...; TEMP:...; HUM:...; WIND:...)</option>
+              <option value="json">JSON Object ({"city":..., "temp":...})</option>
+              <option value="custom">Custom Template ({temp}, {sky}, {humidity}, etc.)</option>
             </select>
 
-            <input type="text" id="custom-template-input" value="CITY:{city}|TEMP:{temp}{unit}" placeholder="Custom template string..." class="hidden w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-brand-500">
+            <input type="text" id="custom-template-input" value="CITY:{city}|SKY:{sky}|TEMP:{temp}{unit}|HUM:{humidity}|WIND:{wind}" placeholder="Custom template string..." class="hidden w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-brand-500">
           </div>
         </div>
 
@@ -354,7 +357,9 @@
     // --- Application State ---
     let currentCity = { name: "Dubai, UAE", lat: 25.2048, lon: 55.2708 };
     let currentUnit = 'C'; // 'C' or 'F'
-    let currentWeatherData = null; // Stores full fetched payload
+    let currentWeatherData = null; 
+    let currentHumidity = '--';
+    let currentSkyDesc = 'Clear sky';
     let autoSyncTimer = null;
 
     // --- Web Serial API State ---
@@ -364,10 +369,10 @@
     let readableStreamClosed = null;
     let writableStreamClosed = null;
     let keepReading = false;
-    let rxBuffer = ''; // Buffer for accumulating partial incoming lines
+    let rxBuffer = ''; // Buffer for incoming lines
 
     // --- Active Log Filter State ---
-    let activeFilter = 'all'; // 'all', 'tx', 'rx', 'sys'
+    let activeFilter = 'all';
 
     // --- DOM Elements ---
     const presetCitiesSelect = document.getElementById('preset-cities');
@@ -416,9 +421,19 @@
     const manualSerialInput = document.getElementById('manual-serial-input');
     const sendManualBtn = document.getElementById('send-manual-btn');
 
-    // --- Check Browser Web Serial Support ---
+    // --- Check Web Serial Support and Frame Context ---
+    const isIframe = window.self !== window.top;
+    const warningBanner = document.getElementById('api-warning');
+    const warningText = document.getElementById('api-warning-text');
+    const openStandaloneBtn = document.getElementById('open-standalone-btn');
+
     if (!("serial" in navigator)) {
-      document.getElementById('api-warning').classList.remove('hidden');
+      warningBanner.classList.remove('hidden');
+      warningText.innerHTML = "<strong>Browser Notice:</strong> Web Serial API is not supported in this browser. Please use Chrome or Edge on Desktop.";
+    } else if (isIframe) {
+      warningBanner.classList.remove('hidden');
+      openStandaloneBtn.classList.remove('hidden');
+      warningText.innerHTML = "<strong>Permissions Notice:</strong> Running inside an iframe/previewer may block serial hardware access.";
     }
 
     // --- Logging & Terminal System ---
@@ -501,7 +516,7 @@
         case 71: case 73: case 75: return { desc: 'Snowfall', icon: 'fa-snowflake text-indigo-300', glow: 'bg-indigo-500/15' };
         case 80: case 81: case 82: return { desc: 'Rain showers', icon: 'fa-cloud-sun-rain text-blue-400', glow: 'bg-blue-500/15' };
         case 95: case 96: case 99: return { desc: 'Thunderstorm', icon: 'fa-bolt text-yellow-400', glow: 'bg-yellow-500/20' };
-        default: return { desc: 'Weather update', icon: 'fa-cloud text-slate-400', glow: 'bg-slate-500/10' };
+        default: return { desc: 'Overcast', icon: 'fa-cloud text-slate-400', glow: 'bg-slate-500/10' };
       }
     }
 
@@ -512,7 +527,6 @@
         fetchSendBtn.disabled = true;
         fetchSendBtn.classList.add('opacity-75');
         
-        // Show sync status in badge
         syncBadge.classList.remove('hidden');
         syncBadgeIcon.className = "fa-solid fa-arrows-rotate text-[10px] text-brand-400 animate-spin";
         syncBadgeText.textContent = "Syncing...";
@@ -527,26 +541,27 @@
 
         currentWeatherData = data.current_weather;
         const weatherInfo = parseWMOCode(currentWeatherData.weathercode);
+        currentSkyDesc = weatherInfo.desc;
 
         // Approximate humidity from hourly array
-        let humidityVal = '--';
+        currentHumidity = '--';
         if (data.hourly && data.hourly.relativehumidity_2m && data.hourly.relativehumidity_2m.length > 0) {
-          humidityVal = `${data.hourly.relativehumidity_2m[0]}%`;
+          currentHumidity = `${data.hourly.relativehumidity_2m[0]}`;
         }
 
         // Update Dashboard UI
         displayCityName.textContent = currentCity.name;
         displayCoords.textContent = `${currentCity.lat.toFixed(2)}° Lat, ${currentCity.lon.toFixed(2)}° Lon`;
         weatherIcon.className = `fa-solid ${weatherInfo.icon} text-base`;
-        weatherDesc.textContent = weatherInfo.desc;
-        displayHumidity.textContent = humidityVal;
+        weatherDesc.textContent = currentSkyDesc;
+        displayHumidity.textContent = `${currentHumidity}%`;
         displayWind.textContent = `${currentWeatherData.windspeed} km/h`;
         tempBgGlow.className = `absolute -top-20 -right-20 w-64 h-64 rounded-full blur-3xl pointer-events-none transition-all duration-700 ${weatherInfo.glow}`;
 
         updateTemperatureDisplay();
         lastUpdateTime.textContent = new Date().toLocaleTimeString();
 
-        logEntry('api', 'Weather', `Successfully fetched ${currentCity.name}: ${currentWeatherData.temperature}°C, Wind ${currentWeatherData.windspeed}km/h`);
+        logEntry('api', 'Weather', `Successfully fetched ${currentCity.name}: ${currentWeatherData.temperature}°C, ${currentSkyDesc}, Wind ${currentWeatherData.windspeed}km/h`);
 
         // Automatically send over serial if connected
         if (port && writer) {
@@ -605,7 +620,7 @@
       }
     }
 
-    // --- Web Serial API Bidirectional Engine ---
+    // --- Web Serial API Engine ---
     async function connectSerial() {
       if (!("serial" in navigator)) {
         alert("Web Serial API is not supported in this browser.");
@@ -621,7 +636,7 @@
         await port.open({ baudRate });
 
         updateSerialStatusUI(true);
-        logEntry('sys', 'Serial', `Serial Port Connected successfully @ ${baudRate} baud`, 'success');
+        logEntry('sys', 'Serial', `Serial Port Connected successfully @ ${baudRate} baud`);
 
         // Prepare Writable Stream for Transmission
         const textEncoder = new TextEncoderStream();
@@ -633,12 +648,16 @@
         readLoop();
 
       } catch (err) {
+        if (err.name === 'NotAllowedError' && isIframe) {
+          warningBanner.classList.remove('hidden');
+          openStandaloneBtn.classList.remove('hidden');
+        }
         logEntry('error', 'Serial', `Connection failed: ${err.message}`);
         cleanUpSerialState();
       }
     }
 
-    // CRITICAL FEATURE: Background Read Loop
+    // Background Read Loop
     async function readLoop() {
       while (port && port.readable && keepReading) {
         const textDecoder = new TextDecoderStream();
@@ -648,14 +667,8 @@
         try {
           while (true) {
             const { value, done } = await reader.read();
-            if (done) {
-              // Reader has been canceled
-              break;
-            }
-            if (value) {
-              // Process incoming text chunks
-              processIncomingSerialChunk(value);
-            }
+            if (done) break;
+            if (value) processIncomingSerialChunk(value);
           }
         } catch (err) {
           logEntry('error', 'Serial RX', `Read error: ${err.message}`);
@@ -665,14 +678,10 @@
       }
     }
 
-    // Buffer incoming serial text and flush complete lines
+    // Buffer incoming serial text and flush lines
     function processIncomingSerialChunk(chunk) {
       rxBuffer += chunk;
-      
-      // Split buffered string by line breaks
       const lines = rxBuffer.split(/\r?\n/);
-      
-      // Keep last incomplete segment in buffer
       rxBuffer = lines.pop();
 
       for (const line of lines) {
@@ -682,7 +691,7 @@
       }
     }
 
-    // Transmit Formatted Temperature Data
+    // Format & Transmit Data
     async function sendTemperatureToSerial() {
       if (!writer) {
         logEntry('error', 'Serial TX', 'Cannot transmit: Serial port is not connected.');
@@ -695,30 +704,46 @@
       }
 
       const rawC = currentWeatherData.temperature;
-      const formattedVal = currentUnit === 'C' ? rawC.toFixed(1) : ((rawC * 9/5) + 32).toFixed(1);
+      const formattedTemp = currentUnit === 'C' ? rawC.toFixed(1) : ((rawC * 9/5) + 32).toFixed(1);
+      const isoTimestamp = new Date().toISOString();
       const lineEnding = JSON.parse(`"${lineEndingSelect.value}"`);
       const formatType = payloadFormatSelect.value;
       
       let payloadText = '';
 
-      if (formatType === 'raw') {
-        payloadText = `${formattedVal}`;
-      } else if (formatType === 'prefixed') {
-        payloadText = `TEMP:${formattedVal}${currentUnit}`;
+      // Required Format Templates
+      if (formatType === 'raw-temp') {
+        // e.g. "23.5"
+        payloadText = `${formattedTemp}`;
+      } else if (formatType === 'raw-sky') {
+        // e.g. "Clear sky"
+        payloadText = `${currentSkyDesc}`;
+      } else if (formatType === 'csv-plain') {
+        // timestamp; city; weather; temp; humidity; wind speed
+        payloadText = `${isoTimestamp}; ${currentCity.name}; ${currentSkyDesc}; ${formattedTemp}; ${currentHumidity}; ${currentWeatherData.windspeed}`;
+      } else if (formatType === 'csv-labeled') {
+        // TIME:timestamp; CITY:city; SKY:sky_weather; TEMP:temp; HUM:humidity; WIND:wind speed
+        payloadText = `TIME:${isoTimestamp}; CITY:${currentCity.name}; SKY:${currentSkyDesc}; TEMP:${formattedTemp}; HUM:${currentHumidity}; WIND:${currentWeatherData.windspeed}`;
       } else if (formatType === 'json') {
         payloadText = JSON.stringify({
+          time: isoTimestamp,
           city: currentCity.name,
-          temp: parseFloat(formattedVal),
+          sky: currentSkyDesc,
+          temp: parseFloat(formattedTemp),
           unit: currentUnit,
+          humidity: currentHumidity,
           wind: currentWeatherData.windspeed
         });
       } else if (formatType === 'custom') {
         const template = customTemplateInput.value;
         payloadText = template
-          .replace(/{temp}/g, formattedVal)
+          .replace(/{temp}/g, formattedTemp)
           .replace(/{unit}/g, currentUnit)
           .replace(/{city}/g, currentCity.name)
-          .replace(/{wind}/g, currentWeatherData.windspeed);
+          .replace(/{sky}/g, currentSkyDesc)
+          .replace(/{humidity}/g, currentHumidity)
+          .replace(/{wind}/g, currentWeatherData.windspeed)
+          .replace(/{timestamp}/g, isoTimestamp);
       }
 
       payloadText += lineEnding;
@@ -736,7 +761,7 @@
       }
     }
 
-    // Clean Serial Disconnection & Stream Lock Release
+    // Clean Serial Disconnection
     async function disconnectSerial() {
       logEntry('sys', 'Serial', 'Closing serial connection...');
       keepReading = false;
@@ -910,7 +935,6 @@
 
       if (!text) return;
       
-      // Fallback execCommand clipboard copy
       const textarea = document.createElement('textarea');
       textarea.value = text;
       document.body.appendChild(textarea);
@@ -934,7 +958,7 @@
       });
     }
 
-    // --- On Load Initialization ---
+    // On Load Initialization
     window.onload = () => {
       fetchWeatherData();
     };
