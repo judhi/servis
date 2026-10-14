@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Weather Serial Bridge & RX Terminal</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom Scrollbar for Terminal Log */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.8);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(51, 65, 85, 0.8);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(71, 85, 105, 1);
+    }
+    .glass-panel {
+      background: rgba(30, 41, 59, 0.65);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col font-sans bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 antialiased selection:bg-brand-500 selection:text-white">
+
+  <!-- Browser Support Warning Banner -->
+  <div id="api-warning" class="hidden bg-amber-500/20 border-b border-amber-500/30 text-amber-200 px-4 py-2.5 text-xs sm:text-sm flex items-center justify-between z-50">
+    <div class="flex items-center space-x-2">
+      <i class="fa-solid fa-triangle-exclamation text-amber-400 text-base"></i>
+      <span><strong>Browser Notice:</strong> Web Serial API is not supported in this browser. Please use a modern Chromium-based desktop browser (Google Chrome, Microsoft Edge, Opera) to read/write hardware serial data.</span>
+    </div>
+    <button onclick="document.getElementById('api-warning').remove()" class="text-amber-300 hover:text-white p-1">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+  </div>
+
+  <!-- App Header -->
+  <header class="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-brand-600/20 text-brand-400 rounded-xl border border-brand-500/30 shadow-sm">
+          <i class="fa-solid fa-satellite-dish text-xl"></i>
+        </div>
+        <div>
+          <h1 class="font-bold text-base sm:text-lg leading-tight tracking-wide text-white">Weather Serial Terminal</h1>
+          <p class="text-xs text-slate-400">Bidirectional USB/UART Serial Interface & Live Weather Gateway</p>
+        </div>
+      </div>
+
+      <!-- Live Status Badges -->
+      <div class="flex items-center space-x-2 sm:space-x-3">
+        <!-- Weather Sync Badge -->
+        <div id="sync-badge" class="hidden sm:flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-medium bg-slate-800/80 text-slate-400 border border-slate-700/80">
+          <i class="fa-solid fa-arrows-rotate text-[10px] text-slate-500" id="sync-badge-icon"></i>
+          <span id="sync-badge-text">Sync: Idle</span>
+        </div>
+
+        <!-- Serial Status Badge -->
+        <div id="status-badge" class="flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+          <span id="status-dot" class="w-2.5 h-2.5 rounded-full bg-slate-500 inline-block"></span>
+          <span id="status-text">Disconnected</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+    <!-- Left Column: Controls & Weather Telemetry (5 Cols) -->
+    <section class="lg:col-span-5 flex flex-col space-y-6">
+
+      <!-- Preset Location & City Search -->
+      <div class="glass-panel rounded-2xl p-5 shadow-xl">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3.5 flex items-center gap-2">
+          <i class="fa-solid fa-earth-americas text-brand-400"></i> Location Selector
+        </h2>
+        
+        <div class="space-y-3.5">
+          <!-- Major Cities Preset -->
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Preset Global Cities</label>
+            <div class="relative">
+              <select id="preset-cities" class="w-full bg-slate-800/90 border border-slate-700/80 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none">
+                <option value="tokyo" data-lat="35.6762" data-lon="139.6503" data-name="Tokyo, Japan">Tokyo, Japan</option>
+                <option value="london" data-lat="51.5074" data-lon="-0.1278" data-name="London, UK">London, UK</option>
+                <option value="new-york" data-lat="40.7128" data-lon="-74.0060" data-name="New York, USA">New York, USA</option>
+                <option value="paris" data-lat="48.8566" data-lon="2.3522" data-name="Paris, France">Paris, France</option>
+                <option value="dubai" data-lat="25.2048" data-lon="55.2708" data-name="Dubai, UAE" selected>Dubai, UAE</option>
+                <option value="sydney" data-lat="-33.8688" data-lon="151.2093" data-name="Sydney, Australia">Sydney, Australia</option>
+                <option value="berlin" data-lat="52.5200" data-lon="13.4050" data-name="Berlin, Germany">Berlin, Germany</option>
+                <option value="singapore" data-lat="1.3521" data-lon="103.8198" data-name="Singapore">Singapore</option>
+                <option value="sao-paulo" data-lat="-23.5505" data-lon="-46.6333" data-name="São Paulo, Brazil">São Paulo, Brazil</option>
+                <option value="cairo" data-lat="30.0444" data-lon="31.2357" data-name="Cairo, Egypt">Cairo, Egypt</option>
+                <option value="mumbai" data-lat="19.0760" data-lon="72.8777" data-name="Mumbai, India">Mumbai, India</option>
+                <option value="toronto" data-lat="43.6532" data-lon="-79.3832" data-name="Toronto, Canada">Toronto, Canada</option>
+                <option value="rome" data-lat="41.9028" data-lon="12.4964" data-name="Rome, Italy">Rome, Italy</option>
+              </select>
+              <i class="fa-solid fa-chevron-down absolute right-3.5 top-3 text-xs text-slate-400 pointer-events-none"></i>
+            </div>
+          </div>
+
+          <!-- Custom City Search -->
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Custom City Search</label>
+            <div class="flex gap-2">
+              <input type="text" id="custom-city-input" placeholder="Search city (e.g. Kyoto)" class="w-full bg-slate-800/90 border border-slate-700/80 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500">
+              <button id="search-city-btn" title="Search City" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium transition-colors flex items-center justify-center shrink-0">
+                <i class="fa-solid fa-magnifying-glass"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- High Visibility Temperature Card -->
+      <div class="glass-panel rounded-2xl p-6 shadow-xl relative overflow-hidden flex flex-col justify-between">
+        <!-- Ambient Glow -->
+        <div id="temp-bg-glow" class="absolute -top-20 -right-20 w-64 h-64 bg-brand-500/10 rounded-full blur-3xl pointer-events-none transition-all duration-700"></div>
+
+        <div>
+          <div class="flex justify-between items-start z-10">
+            <div>
+              <h3 id="display-city-name" class="text-2xl font-bold text-white tracking-wide">Dubai, UAE</h3>
+              <p id="display-coords" class="text-xs font-mono text-slate-400 mt-0.5">25.20° N, 55.27° E</p>
+            </div>
+
+            <!-- Unit Toggle Switcher -->
+            <div class="flex items-center bg-slate-800/90 rounded-xl p-1 border border-slate-700/80">
+              <button id="unit-c" class="px-3 py-1 rounded-lg text-xs font-semibold bg-brand-600 text-white shadow-sm transition-all">°C</button>
+              <button id="unit-f" class="px-3 py-1 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200 transition-all">°F</button>
+            </div>
+          </div>
+
+          <!-- Weather Condition Row -->
+          <div id="weather-condition" class="text-sm text-slate-300 flex items-center gap-2 mt-3 z-10">
+            <i id="weather-icon" class="fa-solid fa-sun text-amber-400 text-base"></i>
+            <span id="weather-desc">Fetching current weather...</span>
+          </div>
+
+          <!-- Big Temperature Output -->
+          <div class="my-5 z-10 flex items-baseline">
+            <span id="display-temp" class="text-6xl sm:text-7xl font-extrabold tracking-tight text-white font-mono">--.-</span>
+            <span id="display-unit-symbol" class="text-3xl font-light text-slate-400 ml-2">°C</span>
+          </div>
+
+          <!-- Telemetry Grid (Humidity & Wind) -->
+          <div class="grid grid-cols-2 gap-3 mb-4 pt-3 border-t border-slate-800/80">
+            <div class="bg-slate-900/60 rounded-xl p-2.5 border border-slate-800/60 flex items-center space-x-3">
+              <div class="p-2 bg-blue-500/10 text-blue-400 rounded-lg text-xs"><i class="fa-solid fa-droplet"></i></div>
+              <div>
+                <p class="text-[10px] text-slate-400 uppercase tracking-wider font-medium">Humidity</p>
+                <p id="display-humidity" class="text-sm font-semibold text-slate-200 font-mono">--%</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-900/60 rounded-xl p-2.5 border border-slate-800/60 flex items-center space-x-3">
+              <div class="p-2 bg-teal-500/10 text-teal-400 rounded-lg text-xs"><i class="fa-solid fa-wind"></i></div>
+              <div>
+                <p class="text-[10px] text-slate-400 uppercase tracking-wider font-medium">Wind Speed</p>
+                <p id="display-wind" class="text-sm font-semibold text-slate-200 font-mono">-- km/h</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Refresh Metadata & Action Button -->
+        <div class="flex items-center justify-between pt-3 border-t border-slate-800/80 z-10 gap-2">
+          <div class="text-[11px] text-slate-400 flex items-center gap-1.5">
+            <i class="fa-regular fa-clock text-slate-500"></i>
+            <span id="last-update-time" class="font-mono text-slate-300">Never fetched</span>
+          </div>
+
+          <button id="fetch-send-btn" class="bg-brand-600 hover:bg-brand-500 active:bg-brand-700 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-md shadow-brand-600/20 transition-all flex items-center gap-2">
+            <i class="fa-solid fa-paper-plane"></i>
+            <span>Fetch &amp; Send Now</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Serial Hardware Settings & Auto-Sync -->
+      <div class="glass-panel rounded-2xl p-5 shadow-xl space-y-4">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+          <i class="fa-solid fa-sliders text-brand-400"></i> Serial &amp; Transmission Options
+        </h2>
+
+        <div class="grid grid-cols-2 gap-3">
+          <!-- Baud Rate -->
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Baud Rate</label>
+            <select id="baud-rate" class="w-full bg-slate-800 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-brand-500">
+              <option value="9600" selected>9600 baud</option>
+              <option value="19200">19200 baud</option>
+              <option value="38400">38400 baud</option>
+              <option value="57600">57600 baud</option>
+              <option value="115200">115200 baud</option>
+            </select>
+          </div>
+
+          <!-- Line Ending -->
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Line Ending</label>
+            <select id="line-ending" class="w-full bg-slate-800 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-brand-500">
+              <option value="\n" selected>LF (\n)</option>
+              <option value="\r\n">CRLF (\r\n)</option>
+              <option value="">None</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Format Preset / Template -->
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Payload Format Template</label>
+          <div class="space-y-2">
+            <select id="payload-format" class="w-full bg-slate-800 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-brand-500">
+              <option value="raw" selected>Raw Value (e.g. 24.5)</option>
+              <option value="prefixed">Prefixed (e.g. TEMP:24.5C)</option>
+              <option value="json">JSON Object (e.g. {"temp":24.5})</option>
+              <option value="custom">Custom Template ({temp}, {unit}, {city})</option>
+            </select>
+
+            <input type="text" id="custom-template-input" value="CITY:{city}|TEMP:{temp}{unit}" placeholder="Custom template string..." class="hidden w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-brand-500">
+          </div>
+        </div>
+
+        <!-- Connection Buttons -->
+        <div class="pt-1">
+          <button id="connect-serial-btn" class="w-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white py-2.5 px-4 rounded-xl text-xs sm:text-sm font-semibold shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2">
+            <i class="fa-solid fa-plug"></i>
+            <span>Connect Serial Device</span>
+          </button>
+          <button id="disconnect-serial-btn" class="hidden w-full bg-rose-600/20 border border-rose-500/40 hover:bg-rose-600 text-rose-200 hover:text-white py-2.5 px-4 rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center justify-center gap-2">
+            <i class="fa-solid fa-plug-circle-xmark"></i>
+            <span>Disconnect Serial Port</span>
+          </button>
+        </div>
+
+        <!-- Periodic Auto Sync Toggle -->
+        <div class="pt-3 border-t border-slate-800/80 flex items-center justify-between">
+          <div class="flex items-center space-x-2.5">
+            <i class="fa-solid fa-arrows-rotate text-slate-400 text-xs"></i>
+            <span class="text-xs text-slate-300 font-medium">Auto Send Interval</span>
+          </div>
+          <div class="flex items-center space-x-2">
+            <select id="auto-sync-interval" class="bg-slate-800 border border-slate-700/80 rounded-lg px-2 py-1 text-xs text-slate-200 focus:outline-none">
+              <option value="30000">30s</option>
+              <option value="60000" selected>1m</option>
+              <option value="300000">5m</option>
+              <option value="600000">10m</option>
+              <option value="900000">15m</option>
+            </select>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="auto-sync-toggle" class="sr-only peer">
+              <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-600"></div>
+            </label>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Right Column: Interactive Bidirectional Terminal Log (7 Cols) -->
+    <section class="lg:col-span-7 flex flex-col h-full min-h-[480px]">
+
+      <div class="glass-panel rounded-2xl p-5 shadow-xl flex-1 flex flex-col">
+        
+        <!-- Terminal Toolbar -->
+        <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800/80 mb-3">
+          <div class="flex items-center space-x-2">
+            <i class="fa-solid fa-terminal text-brand-400 text-sm"></i>
+            <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-300">Event &amp; Transmission Log</h2>
+          </div>
+
+          <!-- Log Filter Controls -->
+          <div class="flex items-center bg-slate-900/80 rounded-xl p-1 border border-slate-800">
+            <button data-filter="all" class="log-filter-btn px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-brand-600 text-white shadow-sm transition-all">All</button>
+            <button data-filter="tx" class="log-filter-btn px-2.5 py-1 rounded-lg text-[11px] font-semibold text-slate-400 hover:text-slate-200 transition-all">TX</button>
+            <button data-filter="rx" class="log-filter-btn px-2.5 py-1 rounded-lg text-[11px] font-semibold text-slate-400 hover:text-slate-200 transition-all">RX</button>
+            <button data-filter="sys" class="log-filter-btn px-2.5 py-1 rounded-lg text-[11px] font-semibold text-slate-400 hover:text-slate-200 transition-all">API/Sys</button>
+          </div>
+
+          <!-- Utility Buttons -->
+          <div class="flex items-center space-x-2">
+            <button id="copy-log-btn" title="Copy Log" class="p-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800/80 hover:bg-slate-700/80 rounded-lg transition-colors">
+              <i class="fa-regular fa-copy"></i>
+            </button>
+            <button id="clear-log-btn" title="Clear Log" class="p-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800/80 hover:bg-slate-700/80 rounded-lg transition-colors">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Terminal Output Area -->
+        <div id="console-output" class="flex-1 bg-slate-950/95 rounded-xl border border-slate-800/90 p-3.5 font-mono text-xs text-slate-300 overflow-y-auto space-y-2 min-h-[320px] max-h-[580px] selection:bg-slate-700">
+          <div class="text-slate-500 italic text-[11px]">[System Initialized] Select a target location and connect a serial hardware interface...</div>
+        </div>
+
+        <!-- Manual Custom Command Input Row -->
+        <div class="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
+          <div class="flex-1 flex items-center bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 focus-within:border-brand-500">
+            <span class="text-slate-500 text-xs mr-2 font-mono">&gt;</span>
+            <input type="text" id="manual-serial-input" placeholder="Type custom command to send..." class="w-full bg-transparent text-xs text-slate-200 focus:outline-none font-mono">
+          </div>
+          <button id="send-manual-btn" class="bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 shrink-0">
+            <i class="fa-solid fa-paper-plane text-[10px]"></i>
+            <span>Send TX</span>
+          </button>
+          
+          <label class="flex items-center text-[11px] text-slate-400 ml-1 cursor-pointer select-none">
+            <input type="checkbox" id="autoscroll-toggle" checked class="rounded border-slate-700 text-brand-600 focus:ring-0 mr-1.5">
+            <span>Auto-scroll</span>
+          </label>
+        </div>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-slate-800/60 py-3.5 text-center text-xs text-slate-500">
+    Weather data from <a href="https://open-meteo.com/" target="_blank" rel="noopener" class="text-slate-400 hover:underline">Open-Meteo</a> &bull; Hardware streaming via browser Web Serial API
+  </footer>
+
+  <!-- Main JavaScript Logic -->
+  <script>
+    // --- Application State ---
+    let currentCity = { name: "Dubai, UAE", lat: 25.2048, lon: 55.2708 };
+    let currentUnit = 'C'; // 'C' or 'F'
+    let currentWeatherData = null; // Stores full fetched payload
+    let autoSyncTimer = null;
+
+    // --- Web Serial API State ---
+    let port = null;
+    let reader = null;
+    let writer = null;
+    let readableStreamClosed = null;
+    let writableStreamClosed = null;
+    let keepReading = false;
+    let rxBuffer = ''; // Buffer for accumulating partial incoming lines
+
+    // --- Active Log Filter State ---
+    let activeFilter = 'all'; // 'all', 'tx', 'rx', 'sys'
+
+    // --- DOM Elements ---
+    const presetCitiesSelect = document.getElementById('preset-cities');
+    const customCityInput = document.getElementById('custom-city-input');
+    const searchCityBtn = document.getElementById('search-city-btn');
+
+    const displayCityName = document.getElementById('display-city-name');
+    const displayCoords = document.getElementById('display-coords');
+    const displayTemp = document.getElementById('display-temp');
+    const displayUnitSymbol = document.getElementById('display-unit-symbol');
+    const displayHumidity = document.getElementById('display-humidity');
+    const displayWind = document.getElementById('display-wind');
+    const weatherIcon = document.getElementById('weather-icon');
+    const weatherDesc = document.getElementById('weather-desc');
+    const lastUpdateTime = document.getElementById('last-update-time');
+    const tempBgGlow = document.getElementById('temp-bg-glow');
+
+    const unitCBtn = document.getElementById('unit-c');
+    const unitFBtn = document.getElementById('unit-f');
+
+    const fetchSendBtn = document.getElementById('fetch-send-btn');
+    const connectSerialBtn = document.getElementById('connect-serial-btn');
+    const disconnectSerialBtn = document.getElementById('disconnect-serial-btn');
+    const baudRateSelect = document.getElementById('baud-rate');
+    const lineEndingSelect = document.getElementById('line-ending');
+    const payloadFormatSelect = document.getElementById('payload-format');
+    const customTemplateInput = document.getElementById('custom-template-input');
+
+    const statusBadge = document.getElementById('status-badge');
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+
+    const syncBadge = document.getElementById('sync-badge');
+    const syncBadgeIcon = document.getElementById('sync-badge-icon');
+    const syncBadgeText = document.getElementById('sync-badge-text');
+
+    const autoSyncToggle = document.getElementById('auto-sync-toggle');
+    const autoSyncInterval = document.getElementById('auto-sync-interval');
+
+    const consoleOutput = document.getElementById('console-output');
+    const clearLogBtn = document.getElementById('clear-log-btn');
+    const copyLogBtn = document.getElementById('copy-log-btn');
+    const autoscrollToggle = document.getElementById('autoscroll-toggle');
+    const filterBtns = document.querySelectorAll('.log-filter-btn');
+
+    const manualSerialInput = document.getElementById('manual-serial-input');
+    const sendManualBtn = document.getElementById('send-manual-btn');
+
+    // --- Check Browser Web Serial Support ---
+    if (!("serial" in navigator)) {
+      document.getElementById('api-warning').classList.remove('hidden');
+    }
+
+    // --- Logging & Terminal System ---
+    function logEntry(type, category, message) {
+      const entry = document.createElement('div');
+      const timeStr = new Date().toLocaleTimeString();
+
+      let tagColor = 'bg-slate-800 text-slate-300 border-slate-700';
+      let tagLabel = 'SYS';
+
+      if (type === 'tx') {
+        tagColor = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+        tagLabel = 'TX SERIAL';
+      } else if (type === 'rx') {
+        tagColor = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+        tagLabel = 'RX SERIAL';
+      } else if (type === 'api') {
+        tagColor = 'bg-blue-500/20 text-blue-300 border-blue-500/40';
+        tagLabel = 'API WEATHER';
+      } else if (type === 'error') {
+        tagColor = 'bg-rose-500/20 text-rose-300 border-rose-500/40';
+        tagLabel = 'ERROR';
+      }
+
+      entry.dataset.category = type;
+      entry.className = `log-item leading-relaxed flex items-start gap-2 text-xs font-mono transition-all ${getFilterVisibilityClass(type)}`;
+      
+      entry.innerHTML = `
+        <span class="text-slate-600 shrink-0 select-none">[${timeStr}]</span>
+        <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase border shrink-0 ${tagColor}">${tagLabel}</span>
+        <span class="text-slate-200 break-all flex-1">${escapeHtml(message)}</span>
+      `;
+
+      consoleOutput.appendChild(entry);
+
+      if (autoscrollToggle.checked) {
+        consoleOutput.scrollTop = consoleOutput.scrollHeight;
+      }
+    }
+
+    function getFilterVisibilityClass(category) {
+      if (activeFilter === 'all') return 'flex';
+      if (activeFilter === 'tx' && category === 'tx') return 'flex';
+      if (activeFilter === 'rx' && category === 'rx') return 'flex';
+      if (activeFilter === 'sys' && (category === 'sys' || category === 'api' || category === 'error')) return 'flex';
+      return 'hidden';
+    }
+
+    function applyLogFilters() {
+      const items = consoleOutput.querySelectorAll('.log-item');
+      items.forEach(item => {
+        const cat = item.dataset.category;
+        if (getFilterVisibilityClass(cat) === 'flex') {
+          item.classList.remove('hidden');
+          item.classList.add('flex');
+        } else {
+          item.classList.add('hidden');
+          item.classList.remove('flex');
+        }
+      });
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    // --- Weather Interpretation & WMO Codes ---
+    function parseWMOCode(code) {
+      switch (code) {
+        case 0: return { desc: 'Clear sky', icon: 'fa-sun text-amber-400', glow: 'bg-amber-500/15' };
+        case 1: case 2: case 3: return { desc: 'Partly cloudy', icon: 'fa-cloud-sun text-amber-300', glow: 'bg-amber-500/10' };
+        case 45: case 48: return { desc: 'Foggy & mist', icon: 'fa-smog text-slate-400', glow: 'bg-slate-500/10' };
+        case 51: case 53: case 55: return { desc: 'Drizzle', icon: 'fa-cloud-rain text-blue-400', glow: 'bg-blue-500/10' };
+        case 61: case 63: case 65: return { desc: 'Rain', icon: 'fa-cloud-showers-heavy text-blue-500', glow: 'bg-blue-500/15' };
+        case 71: case 73: case 75: return { desc: 'Snowfall', icon: 'fa-snowflake text-indigo-300', glow: 'bg-indigo-500/15' };
+        case 80: case 81: case 82: return { desc: 'Rain showers', icon: 'fa-cloud-sun-rain text-blue-400', glow: 'bg-blue-500/15' };
+        case 95: case 96: case 99: return { desc: 'Thunderstorm', icon: 'fa-bolt text-yellow-400', glow: 'bg-yellow-500/20' };
+        default: return { desc: 'Weather update', icon: 'fa-cloud text-slate-400', glow: 'bg-slate-500/10' };
+      }
+    }
+
+    // --- Open-Meteo REST API Fetch ---
+    async function fetchWeatherData() {
+      try {
+        logEntry('api', 'Weather', `Fetching current telemetry for ${currentCity.name}...`);
+        fetchSendBtn.disabled = true;
+        fetchSendBtn.classList.add('opacity-75');
+        
+        // Show sync status in badge
+        syncBadge.classList.remove('hidden');
+        syncBadgeIcon.className = "fa-solid fa-arrows-rotate text-[10px] text-brand-400 animate-spin";
+        syncBadgeText.textContent = "Syncing...";
+
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${currentCity.lat}&longitude=${currentCity.lon}&current_weather=true&hourly=relativehumidity_2m&timezone=auto`;
+        const res = await fetch(url);
+        
+        if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+        const data = await res.json();
+
+        if (!data.current_weather) throw new Error('Invalid JSON response');
+
+        currentWeatherData = data.current_weather;
+        const weatherInfo = parseWMOCode(currentWeatherData.weathercode);
+
+        // Approximate humidity from hourly array
+        let humidityVal = '--';
+        if (data.hourly && data.hourly.relativehumidity_2m && data.hourly.relativehumidity_2m.length > 0) {
+          humidityVal = `${data.hourly.relativehumidity_2m[0]}%`;
+        }
+
+        // Update Dashboard UI
+        displayCityName.textContent = currentCity.name;
+        displayCoords.textContent = `${currentCity.lat.toFixed(2)}° Lat, ${currentCity.lon.toFixed(2)}° Lon`;
+        weatherIcon.className = `fa-solid ${weatherInfo.icon} text-base`;
+        weatherDesc.textContent = weatherInfo.desc;
+        displayHumidity.textContent = humidityVal;
+        displayWind.textContent = `${currentWeatherData.windspeed} km/h`;
+        tempBgGlow.className = `absolute -top-20 -right-20 w-64 h-64 rounded-full blur-3xl pointer-events-none transition-all duration-700 ${weatherInfo.glow}`;
+
+        updateTemperatureDisplay();
+        lastUpdateTime.textContent = new Date().toLocaleTimeString();
+
+        logEntry('api', 'Weather', `Successfully fetched ${currentCity.name}: ${currentWeatherData.temperature}°C, Wind ${currentWeatherData.windspeed}km/h`);
+
+        // Automatically send over serial if connected
+        if (port && writer) {
+          await sendTemperatureToSerial();
+        }
+
+      } catch (err) {
+        logEntry('error', 'Weather', `Fetch failed: ${err.message}`);
+      } finally {
+        fetchSendBtn.disabled = false;
+        fetchSendBtn.classList.remove('opacity-75');
+        syncBadgeIcon.className = "fa-solid fa-arrows-rotate text-[10px] text-slate-500";
+        syncBadgeText.textContent = "Sync: Idle";
+      }
+    }
+
+    // Geocoding for Custom City Search
+    async function geocodeCustomCity(cityName) {
+      try {
+        logEntry('api', 'Geocode', `Searching coordinates for "${cityName}"...`);
+        const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cityName)}&count=1&language=en&format=json`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (!data.results || data.results.length === 0) {
+          throw new Error(`No match found for "${cityName}"`);
+        }
+
+        const match = data.results[0];
+        currentCity = {
+          name: `${match.name}${match.admin1 ? ', ' + match.admin1 : ''}${match.country ? ', ' + match.country : ''}`,
+          lat: match.latitude,
+          lon: match.longitude
+        };
+
+        logEntry('api', 'Geocode', `Location resolved: ${currentCity.name} (${currentCity.lat}, ${currentCity.lon})`);
+        await fetchWeatherData();
+
+      } catch (err) {
+        logEntry('error', 'Geocode', err.message);
+      }
+    }
+
+    // Unit Converter Display
+    function updateTemperatureDisplay() {
+      if (!currentWeatherData) return;
+      const rawC = currentWeatherData.temperature;
+
+      if (currentUnit === 'C') {
+        displayTemp.textContent = rawC.toFixed(1);
+        displayUnitSymbol.textContent = '°C';
+      } else {
+        const rawF = (rawC * 9/5) + 32;
+        displayTemp.textContent = rawF.toFixed(1);
+        displayUnitSymbol.textContent = '°F';
+      }
+    }
+
+    // --- Web Serial API Bidirectional Engine ---
+    async function connectSerial() {
+      if (!("serial" in navigator)) {
+        alert("Web Serial API is not supported in this browser.");
+        return;
+      }
+
+      try {
+        const baudRate = parseInt(baudRateSelect.value, 10);
+        logEntry('sys', 'Serial', `Requesting USB/UART Serial Port at ${baudRate} baud...`);
+
+        // Request Port & Open
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate });
+
+        updateSerialStatusUI(true);
+        logEntry('sys', 'Serial', `Serial Port Connected successfully @ ${baudRate} baud`, 'success');
+
+        // Prepare Writable Stream for Transmission
+        const textEncoder = new TextEncoderStream();
+        writableStreamClosed = textEncoder.readable.pipeTo(port.writable);
+        writer = textEncoder.writable.getWriter();
+
+        // Start Continuous Background Reading Loop
+        keepReading = true;
+        readLoop();
+
+      } catch (err) {
+        logEntry('error', 'Serial', `Connection failed: ${err.message}`);
+        cleanUpSerialState();
+      }
+    }
+
+    // CRITICAL FEATURE: Background Read Loop
+    async function readLoop() {
+      while (port && port.readable && keepReading) {
+        const textDecoder = new TextDecoderStream();
+        readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+        reader = textDecoder.readable.getReader();
+
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) {
+              // Reader has been canceled
+              break;
+            }
+            if (value) {
+              // Process incoming text chunks
+              processIncomingSerialChunk(value);
+            }
+          }
+        } catch (err) {
+          logEntry('error', 'Serial RX', `Read error: ${err.message}`);
+        } finally {
+          reader.releaseLock();
+        }
+      }
+    }
+
+    // Buffer incoming serial text and flush complete lines
+    function processIncomingSerialChunk(chunk) {
+      rxBuffer += chunk;
+      
+      // Split buffered string by line breaks
+      const lines = rxBuffer.split(/\r?\n/);
+      
+      // Keep last incomplete segment in buffer
+      rxBuffer = lines.pop();
+
+      for (const line of lines) {
+        if (line.trim().length > 0) {
+          logEntry('rx', 'Serial', line);
+        }
+      }
+    }
+
+    // Transmit Formatted Temperature Data
+    async function sendTemperatureToSerial() {
+      if (!writer) {
+        logEntry('error', 'Serial TX', 'Cannot transmit: Serial port is not connected.');
+        return;
+      }
+
+      if (!currentWeatherData) {
+        logEntry('error', 'Serial TX', 'No weather data available to transmit.');
+        return;
+      }
+
+      const rawC = currentWeatherData.temperature;
+      const formattedVal = currentUnit === 'C' ? rawC.toFixed(1) : ((rawC * 9/5) + 32).toFixed(1);
+      const lineEnding = JSON.parse(`"${lineEndingSelect.value}"`);
+      const formatType = payloadFormatSelect.value;
+      
+      let payloadText = '';
+
+      if (formatType === 'raw') {
+        payloadText = `${formattedVal}`;
+      } else if (formatType === 'prefixed') {
+        payloadText = `TEMP:${formattedVal}${currentUnit}`;
+      } else if (formatType === 'json') {
+        payloadText = JSON.stringify({
+          city: currentCity.name,
+          temp: parseFloat(formattedVal),
+          unit: currentUnit,
+          wind: currentWeatherData.windspeed
+        });
+      } else if (formatType === 'custom') {
+        const template = customTemplateInput.value;
+        payloadText = template
+          .replace(/{temp}/g, formattedVal)
+          .replace(/{unit}/g, currentUnit)
+          .replace(/{city}/g, currentCity.name)
+          .replace(/{wind}/g, currentWeatherData.windspeed);
+      }
+
+      payloadText += lineEnding;
+      await writeRawToSerial(payloadText);
+    }
+
+    // Helper: Write raw string to active writer
+    async function writeRawToSerial(str) {
+      if (!writer) return;
+      try {
+        logEntry('tx', 'Serial', str.replace(/\r/g, '\\r').replace(/\n/g, '\\n'));
+        await writer.write(str);
+      } catch (err) {
+        logEntry('error', 'Serial TX', `Write error: ${err.message}`);
+      }
+    }
+
+    // Clean Serial Disconnection & Stream Lock Release
+    async function disconnectSerial() {
+      logEntry('sys', 'Serial', 'Closing serial connection...');
+      keepReading = false;
+
+      try {
+        if (reader) {
+          await reader.cancel();
+          await readableStreamClosed.catch(() => {});
+          reader = null;
+        }
+        if (writer) {
+          await writer.close();
+          await writableStreamClosed.catch(() => {});
+          writer = null;
+        }
+        if (port) {
+          await port.close();
+          port = null;
+        }
+        logEntry('sys', 'Serial', 'Port closed cleanly.');
+      } catch (err) {
+        logEntry('error', 'Serial', `Disconnection error: ${err.message}`);
+      } finally {
+        cleanUpSerialState();
+      }
+    }
+
+    function cleanUpSerialState() {
+      port = null;
+      writer = null;
+      reader = null;
+      keepReading = false;
+      rxBuffer = '';
+      updateSerialStatusUI(false);
+    }
+
+    function updateSerialStatusUI(isConnected) {
+      if (isConnected) {
+        statusDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse";
+        statusText.textContent = "Connected";
+        statusBadge.className = "flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30";
+        connectSerialBtn.classList.add('hidden');
+        disconnectSerialBtn.classList.remove('hidden');
+      } else {
+        statusDot.className = "w-2.5 h-2.5 rounded-full bg-slate-500";
+        statusText.textContent = "Disconnected";
+        statusBadge.className = "flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-400 border border-slate-700";
+        connectSerialBtn.classList.remove('hidden');
+        disconnectSerialBtn.classList.add('hidden');
+      }
+    }
+
+    // --- Automatic Periodic Sync Timer ---
+    function setupAutoSync() {
+      if (autoSyncToggle.checked) {
+        startAutoSync();
+      } else {
+        stopAutoSync();
+      }
+    }
+
+    function startAutoSync() {
+      stopAutoSync();
+      const intervalMs = parseInt(autoSyncInterval.value, 10);
+      autoSyncTimer = setInterval(() => {
+        logEntry('sys', 'Timer', 'Auto-sync interval triggered.');
+        fetchWeatherData();
+      }, intervalMs);
+      logEntry('sys', 'Timer', `Auto-sync enabled (${intervalMs / 1000}s interval)`);
+    }
+
+    function stopAutoSync() {
+      if (autoSyncTimer) {
+        clearInterval(autoSyncTimer);
+        autoSyncTimer = null;
+        logEntry('sys', 'Timer', 'Auto-sync disabled.');
+      }
+    }
+
+    // --- Event Handlers & Bindings ---
+    presetCitiesSelect.addEventListener('change', (e) => {
+      const opt = e.target.options[e.target.selectedIndex];
+      currentCity = {
+        name: opt.dataset.name,
+        lat: parseFloat(opt.dataset.lat),
+        lon: parseFloat(opt.dataset.lon)
+      };
+      customCityInput.value = '';
+      fetchWeatherData();
+    });
+
+    searchCityBtn.addEventListener('click', () => {
+      const query = customCityInput.value.trim();
+      if (query) geocodeCustomCity(query);
+    });
+
+    customCityInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        const query = customCityInput.value.trim();
+        if (query) geocodeCustomCity(query);
+      }
+    });
+
+    unitCBtn.addEventListener('click', () => {
+      currentUnit = 'C';
+      unitCBtn.className = "px-3 py-1 rounded-lg text-xs font-semibold bg-brand-600 text-white shadow-sm transition-all";
+      unitFBtn.className = "px-3 py-1 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200 transition-all";
+      updateTemperatureDisplay();
+    });
+
+    unitFBtn.addEventListener('click', () => {
+      currentUnit = 'F';
+      unitFBtn.className = "px-3 py-1 rounded-lg text-xs font-semibold bg-brand-600 text-white shadow-sm transition-all";
+      unitCBtn.className = "px-3 py-1 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200 transition-all";
+      updateTemperatureDisplay();
+    });
+
+    payloadFormatSelect.addEventListener('change', (e) => {
+      if (e.target.value === 'custom') {
+        customTemplateInput.classList.remove('hidden');
+      } else {
+        customTemplateInput.classList.add('hidden');
+      }
+    });
+
+    fetchSendBtn.addEventListener('click', fetchWeatherData);
+    connectSerialBtn.addEventListener('click', connectSerial);
+    disconnectSerialBtn.addEventListener('click', disconnectSerial);
+
+    autoSyncToggle.addEventListener('change', setupAutoSync);
+    autoSyncInterval.addEventListener('change', () => {
+      if (autoSyncToggle.checked) startAutoSync();
+    });
+
+    // Manual Serial Command Transmission
+    sendManualBtn.addEventListener('click', () => {
+      const cmd = manualSerialInput.value;
+      if (cmd && writer) {
+        const lineEnding = JSON.parse(`"${lineEndingSelect.value}"`);
+        writeRawToSerial(cmd + lineEnding);
+        manualSerialInput.value = '';
+      } else if (!writer) {
+        logEntry('error', 'Serial TX', 'Cannot send: Serial port disconnected.');
+      }
+    });
+
+    manualSerialInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        sendManualBtn.click();
+      }
+    });
+
+    // Filter Buttons logic
+    filterBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        filterBtns.forEach(b => {
+          b.className = "log-filter-btn px-2.5 py-1 rounded-lg text-[11px] font-semibold text-slate-400 hover:text-slate-200 transition-all";
+        });
+        btn.className = "log-filter-btn px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-brand-600 text-white shadow-sm transition-all";
+        activeFilter = btn.dataset.filter;
+        applyLogFilters();
+      });
+    });
+
+    // Copy Log to Clipboard
+    copyLogBtn.addEventListener('click', () => {
+      const text = Array.from(consoleOutput.querySelectorAll('.log-item'))
+        .filter(el => !el.classList.contains('hidden'))
+        .map(el => el.innerText)
+        .join('\n');
+
+      if (!text) return;
+      
+      // Fallback execCommand clipboard copy
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+
+      logEntry('sys', 'Log', 'Console output copied to clipboard.');
+    });
+
+    clearLogBtn.addEventListener('click', () => {
+      consoleOutput.innerHTML = '';
+      logEntry('sys', 'Log', 'Console log cleared.');
+    });
+
+    // Handle physical hardware unplugs
+    if ("serial" in navigator) {
+      navigator.serial.addEventListener('disconnect', () => {
+        logEntry('error', 'Serial', 'Hardware device was physically disconnected.');
+        cleanUpSerialState();
+      });
+    }
+
+    // --- On Load Initialization ---
+    window.onload = () => {
+      fetchWeatherData();
+    };
+  </script>
+</body>
+</html>
